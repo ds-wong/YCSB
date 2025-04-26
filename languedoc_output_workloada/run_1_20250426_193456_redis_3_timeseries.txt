@@ -1,0 +1,33 @@
+2025-04-26 19:35:08:772 0 sec: 0 operations; est completion in 0 second 
+2025-04-26 19:35:09:186 0 sec: 1000 operations; 2136.75 current ops/sec; [READ AverageLatency(us)=522.43] [CLEANUP AverageLatency(us)=1506.97] [UPDATE AverageLatency(us)=597.11] 
+[OVERALL], RunTime(ms), 467
+[OVERALL], Throughput(ops/sec), 2141.3276231263385
+[TOTAL_GCS_G1_Young_Generation], Count, 1
+[TOTAL_GC_TIME_G1_Young_Generation], Time(ms), 14
+[TOTAL_GC_TIME_%_G1_Young_Generation], Time(%), 2.9978586723768736
+[TOTAL_GCS_G1_Concurrent_GC], Count, 0
+[TOTAL_GC_TIME_G1_Concurrent_GC], Time(ms), 0
+[TOTAL_GC_TIME_%_G1_Concurrent_GC], Time(%), 0.0
+[TOTAL_GCS_G1_Old_Generation], Count, 0
+[TOTAL_GC_TIME_G1_Old_Generation], Time(ms), 0
+[TOTAL_GC_TIME_%_G1_Old_Generation], Time(%), 0.0
+[TOTAL_GCs], Count, 1
+[TOTAL_GC_TIME], Time(ms), 14
+[TOTAL_GC_TIME_%], Time(%), 2.9978586723768736
+[READ], Operations, 491
+[READ], AverageLatency(us), 522.4297352342159
+[READ], MinLatency(us), 63
+[READ], MaxLatency(us), 19213
+[READ], Return=OK, 491
+[READ], 0, 522.4297352342159
+[CLEANUP], Operations, 32
+[CLEANUP], AverageLatency(us), 1506.96875
+[CLEANUP], MinLatency(us), 383
+[CLEANUP], MaxLatency(us), 5878
+[CLEANUP], 0, 1506.96875
+[UPDATE], Operations, 509
+[UPDATE], AverageLatency(us), 597.4793713163065
+[UPDATE], MinLatency(us), 73
+[UPDATE], MaxLatency(us), 19565
+[UPDATE], Return=OK, 509
+[UPDATE], 0, 597.4793713163065
