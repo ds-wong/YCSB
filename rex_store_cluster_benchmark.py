@@ -160,7 +160,7 @@ class RexStoreClusterBenchmark:
         load_cmd = (
             f"./bin/ycsb load rex_store -P rex_store.properties "
             f"-P workloads/{self.workload} "
-            f"-p threadcount={self.threads} -s"
+            f"-threads {self.threads} -s"
         )
         self.run_command(load_cmd)
 
@@ -169,7 +169,7 @@ class RexStoreClusterBenchmark:
             f"./bin/ycsb run rex_store -P rex_store.properties "
             f"-P workloads/{self.workload} "
             f"-p measurementtype={measurement_type} "
-            f"-p threadcount={self.threads} -s"
+            f"-threads {self.threads} -s"
         )
 
         output_file = os.path.join(
@@ -252,7 +252,7 @@ def main():
         "--runs", type=int, default=2, help="Number of runs per configuration"
     )
     parser.add_argument(
-        "--threads", type=int, default=16, help="Number of threads for YCSB workloads"
+        "--threads", type=int, default=32, help="Number of threads for YCSB workloads"
     )
 
     args = parser.parse_args()

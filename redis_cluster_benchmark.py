@@ -115,7 +115,7 @@ class RedisClusterBenchmark:
         load_cmd = (
             f"./bin/ycsb load redis -P redis.properties "
             f"-P workloads/{self.workload} "
-            f"-p threadcount={self.threads} -s"
+            f"-threads {self.threads} -s"
         )
         self.run_command(load_cmd)
 
@@ -124,7 +124,7 @@ class RedisClusterBenchmark:
             f"./bin/ycsb run redis -P redis.properties "
             f"-P workloads/{self.workload} "
             f"-p measurementtype={measurement_type} "
-            f"-p threadcount={self.threads} -s"
+            f"-threads {self.threads} -s"
         )
 
         output_file = os.path.join(
