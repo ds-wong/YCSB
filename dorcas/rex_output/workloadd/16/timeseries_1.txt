@@ -1,0 +1,30 @@
+2025-04-27 15:19:29:655 0 sec: 0 operations; est completion in 0 second 
+2025-04-27 15:19:29:796 0 sec: 1000 operations; 6134.97 current ops/sec; [READ AverageLatency(us)=3593.46] [CLEANUP AverageLatency(us)=0.03] [INSERT AverageLatency(us)=3437.76] 
+[OVERALL], RunTime(ms), 163
+[OVERALL], Throughput(ops/sec), 6134.9693251533745
+[TOTAL_GCS_G1_Young_Generation], Count, 0
+[TOTAL_GC_TIME_G1_Young_Generation], Time(ms), 0
+[TOTAL_GC_TIME_%_G1_Young_Generation], Time(%), 0.0
+[TOTAL_GCS_G1_Old_Generation], Count, 0
+[TOTAL_GC_TIME_G1_Old_Generation], Time(ms), 0
+[TOTAL_GC_TIME_%_G1_Old_Generation], Time(%), 0.0
+[TOTAL_GCs], Count, 0
+[TOTAL_GC_TIME], Time(ms), 0
+[TOTAL_GC_TIME_%], Time(%), 0.0
+[READ], Operations, 949
+[READ], AverageLatency(us), 3593.4583772391993
+[READ], MinLatency(us), 205
+[READ], MaxLatency(us), 18242
+[READ], Return=OK, 949
+[READ], 0, 3593.4583772391993
+[CLEANUP], Operations, 32
+[CLEANUP], AverageLatency(us), 0.03125
+[CLEANUP], MinLatency(us), 0
+[CLEANUP], MaxLatency(us), 1
+[CLEANUP], 0, 0.03125
+[INSERT], Operations, 51
+[INSERT], AverageLatency(us), 3437.764705882353
+[INSERT], MinLatency(us), 541
+[INSERT], MaxLatency(us), 12851
+[INSERT], Return=OK, 51
+[INSERT], 0, 3437.764705882353
