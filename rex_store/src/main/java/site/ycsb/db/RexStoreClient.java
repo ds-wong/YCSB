@@ -24,6 +24,9 @@ import java.util.logging.Logger;
  * Rex Store client for YCSB.
  * This client communicates with the Rex Store via its TCP protocol
  * with length-prefixed JSON messages.
+ * 
+ * Modified to get a random node every single time while maintaining connection
+ * pool.
  */
 public class RexStoreClient extends DB {
     private static final Logger logger = Logger.getLogger(RexStoreClient.class.getName());
@@ -33,7 +36,6 @@ public class RexStoreClient extends DB {
 
     private static final Set<String> KNOWN_NODES = Collections.synchronizedSet(new HashSet<>());
 
-    private Socket currentConnection;
     private String defaultServer;
     private int maxPoolSize;
 
@@ -53,8 +55,6 @@ public class RexStoreClient extends DB {
                 discoverNodes(defaultServer);
             }
 
-            reconnect();
-
             logger.info("Initialized RexStoreClient with default server: " + defaultServer);
             logger.info("Known cluster nodes: " + KNOWN_NODES);
         } catch (Exception e) {
@@ -67,14 +67,8 @@ public class RexStoreClient extends DB {
      */
     @Override
     public void cleanup() throws DBException {
-        try {
-            if (currentConnection != null && !currentConnection.isClosed()) {
-                returnConnectionToPool(currentConnection);
-                currentConnection = null;
-            }
-        } catch (Exception e) {
-            logger.log(Level.WARNING, "Error during cleanup", e);
-        }
+        // No need to maintain a current connection anymore
+        // The connection pool will handle all connections
     }
 
     /**
@@ -88,7 +82,7 @@ public class RexStoreClient extends DB {
             getParams.put("key", key);
             getCommand.put("Get", getParams);
 
-            JSONObject response = executeCommand(getCommand);
+            JSONObject response = executeCommandWithRandomNode(getCommand);
             if (response.has("Ok") && response.getJSONObject("Ok").has("Value")) {
                 JSONObject valueObj = response.getJSONObject("Ok").getJSONObject("Value");
 
@@ -110,11 +104,6 @@ public class RexStoreClient extends DB {
             return Status.ERROR;
         } catch (Exception e) {
             logger.log(Level.WARNING, "Error reading key " + key, e);
-            try {
-                reconnect();
-            } catch (DBException dbEx) {
-                logger.log(Level.SEVERE, "Failed to reconnect", dbEx);
-            }
             return Status.ERROR;
         }
     }
@@ -157,7 +146,7 @@ public class RexStoreClient extends DB {
             setParams.put("value", valueToInsert);
             setCommand.put("Set", setParams);
 
-            JSONObject response = executeCommand(setCommand);
+            JSONObject response = executeCommandWithRandomNode(setCommand);
 
             if (response.has("error")) {
                 logger.warning("Error inserting key " + key + ": " + response.getString("error"));
@@ -170,11 +159,6 @@ public class RexStoreClient extends DB {
             return Status.ERROR;
         } catch (Exception e) {
             logger.log(Level.WARNING, "Error inserting key " + key, e);
-            try {
-                reconnect();
-            } catch (DBException dbEx) {
-                logger.log(Level.SEVERE, "Failed to reconnect", dbEx);
-            }
             return Status.ERROR;
         }
     }
@@ -189,25 +173,26 @@ public class RexStoreClient extends DB {
     }
 
     /**
-     * Execute a command against the Rex Store.
+     * Execute a command against a random node in the Rex Store cluster.
      */
-    private JSONObject executeCommand(JSONObject command) throws IOException, DBException {
-        if (currentConnection == null || currentConnection.isClosed()) {
-            reconnect();
-        }
+    private JSONObject executeCommandWithRandomNode(JSONObject command) throws IOException, DBException {
+        String randomNode = getRandomNode();
+        Socket connection = null;
 
         try {
+            connection = getConnection(randomNode);
+
             byte[] commandBytes = command.toString().getBytes();
             int commandLength = commandBytes.length;
 
             byte[] lengthPrefix = ByteBuffer.allocate(LENGTH_PREFIX_SIZE).putInt(commandLength).array();
 
-            OutputStream out = currentConnection.getOutputStream();
+            OutputStream out = connection.getOutputStream();
             out.write(lengthPrefix);
             out.write(commandBytes);
             out.flush();
 
-            InputStream in = currentConnection.getInputStream();
+            InputStream in = connection.getInputStream();
             byte[] responseLengthBytes = new byte[LENGTH_PREFIX_SIZE];
             if (in.read(responseLengthBytes) != LENGTH_PREFIX_SIZE) {
                 throw new IOException("Failed to read response length prefix");
@@ -227,9 +212,25 @@ public class RexStoreClient extends DB {
 
             String responseString = new String(responseBytes);
             return new JSONObject(responseString);
-        } catch (IOException e) {
-            reconnect();
-            throw e;
+        } finally {
+            if (connection != null) {
+                returnConnectionToPool(connection);
+            }
+        }
+    }
+
+    /**
+     * Get a random node from the known nodes.
+     */
+    private String getRandomNode() {
+        String[] knownNodesArray = KNOWN_NODES.toArray(new String[0]);
+        if (knownNodesArray.length > 0) {
+            int randomIndex = ThreadLocalRandom.current().nextInt(knownNodesArray.length);
+            return knownNodesArray[randomIndex];
+        } else {
+            // If no nodes are known, use the default server
+            KNOWN_NODES.add(defaultServer);
+            return defaultServer;
         }
     }
 
@@ -240,11 +241,26 @@ public class RexStoreClient extends DB {
         List<Socket> connections = CONNECTION_POOL.computeIfAbsent(server, k -> new ArrayList<>());
 
         synchronized (connections) {
-            if (!connections.isEmpty()) {
-                return connections.remove(connections.size() - 1);
+            // Check for existing connections in the pool
+            Iterator<Socket> it = connections.iterator();
+            while (it.hasNext()) {
+                Socket socket = it.next();
+                it.remove();
+
+                // Check if connection is still valid
+                if (!socket.isClosed() && socket.isConnected()) {
+                    return socket;
+                } else {
+                    try {
+                        socket.close();
+                    } catch (IOException e) {
+                        // Ignore
+                    }
+                }
             }
         }
 
+        // No valid connection in pool, create a new one
         String[] hostPort = server.split(":");
         String host = hostPort[0];
         int port = Integer.parseInt(hostPort[1]);
@@ -259,7 +275,7 @@ public class RexStoreClient extends DB {
      * Return a connection to the pool.
      */
     private void returnConnectionToPool(Socket connection) {
-        if (connection == null || connection.isClosed()) {
+        if (connection == null || connection.isClosed() || !connection.isConnected()) {
             return;
         }
 
@@ -273,41 +289,11 @@ public class RexStoreClient extends DB {
             }
         }
 
+        // Pool is full, close connection
         try {
             connection.close();
         } catch (IOException e) {
             logger.log(Level.WARNING, "Error closing connection", e);
-        }
-    }
-
-    /**
-     * Reconnect to a random node in the cluster.
-     */
-    private void reconnect() throws DBException {
-        try {
-            if (currentConnection != null && !currentConnection.isClosed()) {
-                returnConnectionToPool(currentConnection);
-            }
-
-            String[] knownNodesArray = KNOWN_NODES.toArray(new String[0]);
-            String targetServer;
-
-            if (knownNodesArray.length > 0) {
-                int randomIndex = ThreadLocalRandom.current().nextInt(knownNodesArray.length);
-                targetServer = knownNodesArray[randomIndex];
-            } else {
-                targetServer = defaultServer;
-                KNOWN_NODES.add(defaultServer);
-            }
-
-            currentConnection = getConnection(targetServer);
-            logger.fine("Connected to " + targetServer);
-
-            if (ThreadLocalRandom.current().nextDouble() < 0.1) {
-                discoverNodes(targetServer);
-            }
-        } catch (Exception e) {
-            throw new DBException("Failed to connect to any Rex Store node", e);
         }
     }
 
@@ -355,13 +341,32 @@ public class RexStoreClient extends DB {
                 String responseString = new String(responseBytes);
                 JSONObject response = new JSONObject(responseString);
 
-                if (response.has("members")) {
-                    JSONArray members = response.getJSONArray("members");
-                    for (int i = 0; i < members.length(); i++) {
-                        String member = members.getString(i);
-                        KNOWN_NODES.add(member);
+                // Parse the nested structure: Ok -> GossipMessage -> Pong -> members
+                if (response.has("Ok")) {
+                    JSONObject okResponse = response.getJSONObject("Ok");
+                    if (okResponse.has("GossipMessage")) {
+                        JSONObject gossipMessage = okResponse.getJSONObject("GossipMessage");
+                        if (gossipMessage.has("Pong")) {
+                            JSONObject pong = gossipMessage.getJSONObject("Pong");
+
+                            // Add the sender node
+                            if (pong.has("sender")) {
+                                String sender = pong.getString("sender");
+                                KNOWN_NODES.add(sender);
+                            }
+
+                            // Add the member nodes
+                            if (pong.has("members")) {
+                                JSONArray members = pong.getJSONArray("members");
+                                for (int i = 0; i < members.length(); i++) {
+                                    String member = members.getString(i);
+                                    KNOWN_NODES.add(member);
+                                }
+                            }
+
+                            logger.info("Discovered nodes: " + KNOWN_NODES);
+                        }
                     }
-                    logger.info("Discovered nodes: " + KNOWN_NODES);
                 }
             } finally {
                 returnConnectionToPool(tempConnection);
