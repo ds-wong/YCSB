@@ -8,15 +8,24 @@ from datetime import datetime
 
 
 class RedisClusterBenchmark:
-    def __init__(self, workload, base_port=7000, runs=2, threads=32):
+    def __init__(
+        self,
+        workload,
+        node_count,
+        base_port=7000,
+        runs=2,
+        threads=32,
+    ):
         self.workload = workload
+        self.node_count = node_count
         self.base_port = base_port
         self.runs = runs
         self.threads = threads
-        self.node_counts = [3, 6, 10, 16, 32]
         self.measurement_types = ["timeseries", "histogram"]
-        self.output_dir = "bench_output"
+        self.output_base_dir = "redis_output"
 
+        # Create output directory structure
+        self.output_dir = os.path.join(self.output_base_dir, workload, str(node_count))
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
             print(f"Created output directory: {self.output_dir}")
@@ -48,12 +57,12 @@ class RedisClusterBenchmark:
         self.run_command("mvn clean package -pl redis -am -DskipTests")
         print("Build completed successfully.")
 
-    def launch_redis_cluster(self, num_nodes):
+    def launch_redis_cluster(self):
         """Launch Redis cluster and wait for it to be ready."""
-        print(f"Launching Redis cluster with {num_nodes} nodes...")
+        print(f"Launching Redis cluster with {self.node_count} nodes...")
 
         process = subprocess.Popen(
-            f"./redis_cluster_launch.sh {num_nodes} {self.base_port}",
+            f"./redis_cluster_launch.sh {self.node_count} {self.base_port}",
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -66,7 +75,7 @@ class RedisClusterBenchmark:
         timeout = 120  # 2 minutes timeout
         start_time = time.time()
 
-        while ok_count < num_nodes and time.time() - start_time < timeout:
+        while ok_count < self.node_count and time.time() - start_time < timeout:
             line = process.stdout.readline()
             if not line and process.poll() is not None:
                 break
@@ -74,18 +83,18 @@ class RedisClusterBenchmark:
                 print(line.strip())
                 if "Cluster state changed: ok" in line:
                     ok_count += 1
-                    print(f"*** Detected {ok_count}/{num_nodes} nodes ready ***")
+                    print(f"*** Detected {ok_count}/{self.node_count} nodes ready ***")
 
         if process.poll() is None:
             time.sleep(2)
             if process.poll() is None:
                 process.terminate()
 
-        if ok_count == num_nodes:
-            print(f"All {num_nodes} nodes are ready!")
+        if ok_count == self.node_count:
+            print(f"All {self.node_count} nodes are ready!")
             return True
         else:
-            print(f"Timeout or error: Only {ok_count}/{num_nodes} nodes ready.")
+            print(f"Timeout or error: Only {ok_count}/{self.node_count} nodes ready.")
             return False
 
     def clean_maven_output(self, content):
@@ -109,7 +118,7 @@ class RedisClusterBenchmark:
         else:
             return content
 
-    def run_ycsb_workload(self, measurement_type, num_nodes, output_prefix):
+    def run_ycsb_workload(self, measurement_type, run_number):
         """Run YCSB workload with specified measurement type."""
         print(f"Loading data with {self.threads} threads...")
         load_cmd = (
@@ -128,10 +137,10 @@ class RedisClusterBenchmark:
         )
 
         output_file = os.path.join(
-            self.output_dir, f"{output_prefix}_redis_{num_nodes}_{measurement_type}.txt"
+            self.output_dir, f"{measurement_type}_{run_number}.txt"
         )
-        stdout, _ = self.run_command(run_cmd)
 
+        stdout, _ = self.run_command(run_cmd)
         cleaned_output = self.clean_maven_output(stdout)
 
         with open(output_file, "w") as f:
@@ -143,45 +152,49 @@ class RedisClusterBenchmark:
         """Reset Redis cluster for next run."""
         print("Resetting Redis cluster...")
         self.run_command("./redis_cluster_reset.sh")
+        # Add a delay to ensure the cluster is fully stopped
+        time.sleep(3)
 
     def run_benchmark(self):
         """Run the complete benchmark suite."""
         self.build_redis()
 
-        for node_count in self.node_counts:
-            print(f"\n{'=' * 50}")
-            print(f"Starting benchmarks for {node_count} nodes")
-            print(f"{'=' * 50}")
+        print(f"\n{'=' * 50}")
+        print(f"Starting benchmarks for {self.node_count} nodes")
+        print(f"{'=' * 50}")
 
-            if not self.launch_redis_cluster(node_count):
-                print(f"Failed to launch cluster with {node_count} nodes. Skipping...")
-                self.reset_redis_cluster()
+        for run in range(self.runs):
+            print(f"\n{'*' * 40}")
+            print(f"Starting Run {run + 1}/{self.runs}")
+            print(f"{'*' * 40}")
+
+            # Launch a fresh Redis cluster for this run
+            if not self.launch_redis_cluster():
+                print(f"Failed to launch cluster for run {run + 1}. Skipping...")
                 continue
 
-            for run in range(self.runs):
+            try:
                 for measurement_type in self.measurement_types:
                     print(
                         f"\nRun {run + 1}/{self.runs} with {measurement_type} measurement"
                     )
 
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    output_prefix = f"run_{run + 1}_{timestamp}"
-                    self.run_ycsb_workload(measurement_type, node_count, output_prefix)
-
+                    self.run_ycsb_workload(measurement_type, run + 1)
                     time.sleep(2)
-
-            self.reset_redis_cluster()
-
-            time.sleep(5)
+            finally:
+                # Always reset the cluster after each run
+                self.reset_redis_cluster()
+                print(f"Completed run {run + 1}/{self.runs}")
 
         print("\n" + "=" * 50)
-        print("Benchmark suite completed!")
+        print("All benchmark runs completed!")
         print("=" * 50)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Redis Cluster Benchmark Tool")
     parser.add_argument("workload", help="YCSB workload file name (e.g., workloada)")
+    parser.add_argument("node_count", type=int, help="Number of nodes in the cluster")
     parser.add_argument(
         "--base-port", type=int, default=7000, help="Base port for Redis nodes"
     )
@@ -199,7 +212,7 @@ def main():
         sys.exit(1)
 
     benchmark = RedisClusterBenchmark(
-        args.workload, args.base_port, args.runs, args.threads
+        args.workload, args.node_count, args.base_port, args.runs, args.threads
     )
     benchmark.run_benchmark()
 

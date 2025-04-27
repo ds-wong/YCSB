@@ -12,6 +12,7 @@ class RexStoreClusterBenchmark:
     def __init__(
         self,
         workload,
+        node_count,
         replication_factor=3,
         write_quorum=2,
         read_quorum=1,
@@ -19,17 +20,19 @@ class RexStoreClusterBenchmark:
         threads=32,
     ):
         self.workload = workload
+        self.node_count = node_count
         self.replication_factor = replication_factor
         self.write_quorum = write_quorum
         self.read_quorum = read_quorum
         self.runs = runs
         self.threads = threads
-        self.node_counts = [3, 6, 10, 16, 32]
         self.measurement_types = ["timeseries", "histogram"]
-        self.output_dir = "bench_output"
+        self.output_base_dir = "rex_output"
         self.rex_store_path = os.path.expanduser("~/rex_store")
         self.current_process = None
 
+        # Create output directory structure
+        self.output_dir = os.path.join(self.output_base_dir, workload, str(node_count))
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
             print(f"Created output directory: {self.output_dir}")
@@ -72,21 +75,20 @@ class RexStoreClusterBenchmark:
         self.run_command("mvn clean package -pl rex_store -am -DskipTests")
         print("YCSB rex_store client build completed successfully.")
 
-    def launch_rex_store_cluster(self, num_nodes):
+    def launch_rex_store_cluster(self):
         """Launch rex_store cluster and wait for it to be ready."""
-        print(f"Launching rex_store cluster with {num_nodes} nodes...")
+        print(f"Launching rex_store cluster with {self.node_count} nodes...")
 
         original_dir = os.getcwd()
         try:
             os.chdir(self.rex_store_path)
 
             cmd = (
-                f"cargo run --release -- -n {num_nodes} "
+                f"cargo run --release -- -n {self.node_count} "
                 f"-N {self.replication_factor} "
                 f"-w {self.write_quorum} "
                 f"-r {self.read_quorum}"
             )
-
 
             self.current_process = subprocess.Popen(
                 cmd.split(),
@@ -99,7 +101,9 @@ class RexStoreClusterBenchmark:
             )
 
             if self.current_process.poll() is None:
-                print(f"rex_store cluster with {num_nodes} nodes started successfully!")
+                print(
+                    f"rex_store cluster with {self.node_count} nodes started successfully!"
+                )
                 return True
             else:
                 exit_code = self.current_process.poll()
@@ -154,7 +158,7 @@ class RexStoreClusterBenchmark:
         else:
             return content
 
-    def run_ycsb_workload(self, measurement_type, num_nodes, output_prefix):
+    def run_ycsb_workload(self, measurement_type, run_number):
         """Run YCSB workload with specified measurement type."""
         print(f"Loading data with {self.threads} threads...")
         load_cmd = (
@@ -173,11 +177,10 @@ class RexStoreClusterBenchmark:
         )
 
         output_file = os.path.join(
-            self.output_dir,
-            f"{output_prefix}_rex_store_{num_nodes}_{measurement_type}.txt",
+            self.output_dir, f"{measurement_type}_{run_number}.txt"
         )
-        stdout, _ = self.run_command(run_cmd)
 
+        stdout, _ = self.run_command(run_cmd)
         cleaned_output = self.clean_maven_output(stdout)
 
         with open(output_file, "w") as f:
@@ -190,43 +193,39 @@ class RexStoreClusterBenchmark:
         self.build_rex_store()
         self.build_ycsb_client()
 
-        for node_count in self.node_counts:
-            print(f"\n{'=' * 50}")
-            print(f"Starting benchmarks for {node_count} nodes")
-            print(f"{'=' * 50}")
+        print(f"\n{'=' * 50}")
+        print(f"Starting benchmarks for {self.node_count} nodes")
+        print(f"{'=' * 50}")
 
-            if not self.launch_rex_store_cluster(node_count):
-                print(f"Failed to launch cluster with {node_count} nodes. Skipping...")
-                continue
+        for run in range(self.runs):
+            for measurement_type in self.measurement_types:
+                print(
+                    f"\nRun {run + 1}/{self.runs} with {measurement_type} measurement"
+                )
 
-            try:
-                for run in range(self.runs):
-                    for measurement_type in self.measurement_types:
-                        print(
-                            f"\nRun {run + 1}/{self.runs} with {measurement_type} measurement"
-                        )
+                # Launch cluster for each run and measurement type
+                if not self.launch_rex_store_cluster():
+                    print(
+                        f"Failed to launch cluster with {self.node_count} nodes. Exiting..."
+                    )
+                    sys.exit(1)
 
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        output_prefix = f"run_{run + 1}_{timestamp}"
-                        self.run_ycsb_workload(
-                            measurement_type, node_count, output_prefix
-                        )
-
-                        time.sleep(2)
-            finally:
-                # Always stop the cluster, even if an error occurs
-                self.stop_rex_store_cluster()
-
-            time.sleep(5)
+                try:
+                    self.run_ycsb_workload(measurement_type, run + 1)
+                    time.sleep(2)
+                finally:
+                    # Stop cluster after each run
+                    self.stop_rex_store_cluster()
 
         print("\n" + "=" * 50)
-        print("Benchmark suite completed!")
+        print("Benchmark completed!")
         print("=" * 50)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Rex Store Cluster Benchmark Tool")
     parser.add_argument("workload", help="YCSB workload file name (e.g., workloada)")
+    parser.add_argument("node_count", type=int, help="Number of nodes in the cluster")
     parser.add_argument(
         "--replication-factor",
         "-N",
@@ -263,6 +262,7 @@ def main():
 
     benchmark = RexStoreClusterBenchmark(
         args.workload,
+        args.node_count,
         args.replication_factor,
         args.write_quorum,
         args.read_quorum,
