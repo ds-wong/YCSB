@@ -28,7 +28,7 @@ class RexStoreClusterBenchmark:
         self.threads = threads
         self.measurement_types = ["timeseries", "histogram"]
         self.output_base_dir = "rex_output"
-        self.rex_store_path = os.path.expanduser("~/rex_store")
+        self.rex_store_path = os.path.expanduser("~/Desktop/Concurrency/rex_store")
         self.current_process = None
 
         # Create output directory structure
